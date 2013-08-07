@@ -27,6 +27,7 @@ var ModuleCharacteristics = {
 	TerminalServerAware: 0x8000
 };
 
+// TODO move this to reader
 function readsz(reader, length) {
 	var s = "";
 	for (var i = 0; i < length; i++){
@@ -47,7 +48,10 @@ function PEImage(reader) {
 
 	function BadImageFormat() { return new Error("bad image format"); }
 
-	var image = {};
+	var image = {
+		module: {},
+		sections: []
+	};
 
 	image.resolveRva = function(rva){
 		for (var i = 0; i < image.sections.length; i++)
@@ -80,8 +84,6 @@ function PEImage(reader) {
 
 		// PEFileHeader
 
-	
-
 		// TODO convert architecture to enum (human readable string)
 		image.architecture = reader.read(U16);
 		var numberOfSections = reader.read(U16);
@@ -95,15 +97,14 @@ function PEImage(reader) {
 		// Characteristics		2
 		var characteristics = reader.read(U16);
 
-		var cli, subsystem, dll_characteristics;
+		var cliHeader, subsystem, dll_characteristics;
 		readOptionalHeaders();
 
-		image.kind = resolveModuleKind();
-		image.characteristics = dll_characteristics;
+		image.module.kind = resolveModuleKind();
+		image.module.characteristics = dll_characteristics;
 
 		image.sections = readSections();
-		// TODO
-		// readCliHeader();
+		readCliHeader();
 
 		function readDataDirectory() {
 			return {
@@ -184,7 +185,7 @@ function PEImage(reader) {
 			reader.skip(56);
 
 			// CLIHeader			8
-			cli = readDataDirectory();
+			cliHeader = readDataDirectory();
 
 			if (cli.IsEmpty)
 				throw new BadImageFormat();
@@ -221,6 +222,39 @@ function PEImage(reader) {
 			return sections;
 		}
 
+		function readCliHeader() {
+			moveToDir(reader, cliHeader);
+
+			// - CLIHeader
+
+			// Cb						4
+			// MajorRuntimeVersion		2
+			// MinorRuntimeVersion		2
+			reader.skip(8);
+
+			var metadata = readDataDirectory();
+
+			image.module.attributes = reader.Read(U32);
+			// EntryPointToken			4
+			image.module.entryPointToken = reader.Read(U32);
+			// Resources				8
+			image.module.resources = readDataDirectory();
+			// StrongNameSignature		8
+			image.module.strongName = readDataDirectory();
+
+			// CodeManagerTable			8
+			// VTableFixups				8
+			// ExportAddressTableJumps	8
+			// ManagedNativeHeader		8
+
+			// TODO why PEImage should move to metadata section? consider to move this to metadata layer.
+			moveToDir(reader, metadata);
+		}
+
+		function moveToDir(dir){
+			reader.seek(image.resolveRva(dir.rva));
+		}
+
 		function resolveModuleKind() {
 			if ((characteristics & 0x2000) != 0) // ImageCharacteristics.Dll
 				return ModuleKind.Dll;
@@ -233,4 +267,6 @@ function PEImage(reader) {
 	}
 
 	load();
+
+	return image;
 }
