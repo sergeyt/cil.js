@@ -49,6 +49,13 @@ var TableId = {
 	EncodingMap: 31,
 };
 
+Array.range = function(start, length){
+	var r = [];
+	for (var i = 0; i < length; i++)
+		r.push(start + i);
+	return r;
+};
+
 var STR = 101; // index to string pool
 var BLOB = 102; // index to blob pool
 var GUID = 103; // index to guid pool
@@ -532,6 +539,17 @@ function MetaReader(reader) {
 		}
 	}
 
+	function getTableNames() {
+		var result = new Array(64);
+		var keys = Object.keys(TableId);
+		for (var i = 0; i < keys.length; i++) {
+			var key = keys[i];
+			var id = TableId[key];
+			result[id] = key;
+		}
+		return result;
+	}
+
 	function initTables() {
 		reader.skip(4); //reserved: 4, always 0
 
@@ -540,27 +558,36 @@ function MetaReader(reader) {
 			minorVersion: reader.read(U8),
 			heapSizes: reader.read(U8),
 			reserved: reader.read(U8), //reserved: 1, always 1
-			// TODO read two U32 nums since js unsupports 64-bit ints
-			valid: reader.read(U64),
-			sorted: reader.read(U64),
+			valid1: reader.read(U32),
+			valid2: reader.read(U32),
+			sorted1: reader.read(U32),
+			sorted2: reader.read(U32)
 		};
 
 		var heapSizes = header.heapSizes;
 		var maxTableCount = 64;
 		md.tables = new Array(maxTableCount);
 
+		var tableNames = getTableNames();
+
+		function isBitSet(u1, u2, bit) {
+			if (bit <= 16) return ((u1 >> bit) & 1) != 0;
+			return ((u2 >> (bit - 16)) & 1) != 0;
+		}
+
 		// read table row nums
-		var present = header.Valid; // if bit is set table is presented, otherwise it is empty
 		for (var i = 0; i < maxTableCount; i++) {
-			// if flag set table is presented
-			if (((present >> i) & 1) != 0) {
+			// if bit is set table is presented, otherwise it is empty
+			if (isBitSet(header.valid1, header.valid2, i)) {
 				var rowCount = reader.read(I32);
 				var table = {
 					id: i,
-					name: String(id), // TODO key inside TableId
+					name: tableNames[id],
+					rowCount: rowCount,
+					isSorted: isBitSet(header.sorted1, header.sorted2, i)
 				};
-				table.rowCount = rowCount;
-				table.isSorted = ((header.sorted >> i) & 1) != 0;
+				table.schema = MetaSchema[table.name];
+				table.fetch = fetchRowFn(table);
 				md.tables[i] = table;
 			} else {
 				md.tables[i] = null;
@@ -573,9 +600,12 @@ function MetaReader(reader) {
 			return n >= 0x10000 ? 4 : 2;
 		}
 
+		function isObject(v) { return !!(v && (typeof v == 'object')); }
+		function isTableIndex(col) { return col.tableId !== undefined; }
+
 		function getColumnSize(col) {
 			if (isObject(col)) {
-				if (col.tableId !== undefined) {
+				if (isTableIndex(col.tableId)) {
 					return tableIndexSize(col.tableId);
 				} else { // coded index
 					var tables = col.tables.map(tableIndexSize);
@@ -585,6 +615,12 @@ function MetaReader(reader) {
 			}
 
 			switch (col) {
+				case STR:
+					return (heapSizes & 1) == 0 ? 2 : 4;
+				case GUID:
+					return (heapSizes & 2) == 0 ? 2 : 4;
+				case BLOB:
+					return (heapSizes & 4) == 0 ? 2 : 4;
 				case I8:
 				case U8:
 					return 1;
@@ -606,8 +642,14 @@ function MetaReader(reader) {
 			if (table != null) {
 				table.offset = pos;
 				var rowSize = 0;
-				for (var column in Object.keys(MetaSchema[table.name]))
-					rowSize += getColumnSize(column);
+				var columns = [];
+				for (var colkey in Object.keys(table.schema)) {
+					var coldef = table.schema[colkey];
+					var colsize = getColumnSize(coldef);
+					rowSize += colsize;
+					columns.push({ name: colkey, size: colsize, def: coldef });
+				}
+				table.columns = columns;
 				table.rowSize = rowSize;
 				table.size = table.rowCount * rowSize;
 				pos += table.size;
@@ -615,9 +657,52 @@ function MetaReader(reader) {
 		}
 	}
 
+	function fetchRowFn(table) {
+		return function(rowIndex) {
+			var offset = table.offset + rowIndex * table.rowSize;
+			var rowReader = reader.slice(offset, table.rowSize);
+			var colcount = table.columns.length;
+			var cells = new Array(colcount);
+			for (var i = 0; i < colcount; i++) {
+				var col = table.columns[i];
+				var rv = col.size == 2 ? rowReader.read(U16) : rowReader(U32); // raw value
+				var value = decodeColumnValue(col, rv);
+				cells[i] = {
+					column: col,
+					value: value
+				};
+			}
+			return {
+				table: table,
+				index: rowIndex,
+				cells: cells
+			};
+		};
+	}
+
+	function decodeColumnValue(col, value) {
+		if (isObject(col)) {
+			if (isTableIndex(col.tableId)) {
+				return { tableId: col.tableId, index: value };
+			} else { // coded index
+				return decodeCodedIndex(col, value);
+			}
+		}
+
+		switch (col) {
+			case STR:
+				return strings.fetch(value);
+			case GUID:
+				// guid index is 1 based
+				return value == 0 ? EmptyGuid : guids(value - 1);
+			case BLOB:
+				return blobs.fetch(value);
+			default:
+				return value;
+		}
+	}
+
 	load();
 	
-	// TODO read/fetch row as function of table object
-
 	return md;
 }
