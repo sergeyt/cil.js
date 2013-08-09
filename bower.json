@@ -1,0 +1,17 @@
+{
+  "name": "io.js",
+  "version": "0.1.0",
+  "main": "src/stream.js",
+  "maintainers": [{
+    "name": "Sergey Todyshev",
+    "email": "stodyshev@gmail.com"
+  }],
+  "dependencies": {
+    "jasmine": "latest"
+  },
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "components"
+  ]
+}

@@ -4,19 +4,24 @@
 		<title>Jasmine Test Runner</title>
 		<meta charset="utf-8"/>
 
-		<link rel="stylesheet" type="text/css" href="jasmine/jasmine.css">
+		<link rel="stylesheet" type="text/css" href="../lib/jasmine/lib/jasmine-core/jasmine.css">
 		
 		<script src="http://code.jquery.com/jquery.js"></script>
 		
 		<!-- load jasmine framework with reportes -->
-		<script src="jasmine/jasmine.js"></script>
-		<script src="jasmine/jasmine-html.js"></script>
-		<script src="jasmine/jasmine-jquery.js"></script>
-		<script src="jasmine/jasmine.teamcity_reporter.js"></script>
+		<script src="../lib/jasmine/lib/jasmine-core/jasmine.js"></script>
+		<script src="../lib/jasmine/lib/jasmine-core/jasmine-html.js"></script>
+
+		<!-- libs -->
+		<script src="../lib/DataView/DataView.js"></script>
+		<script src="../lib/io/stream.js"></script>
 		
 		<!-- js scipts to test -->
+		<script src="../src/runtime/pe.js"></script>
+		<script src="../src/runtime/meta.js"></script>
 		
 		<!-- include test files here... -->
+		<script src="metaTests.js"></script>
 
 		<script type="text/javascript">
 			$(function() {
@@ -34,7 +39,6 @@
 				}
 
 				jasmineEnv.addReporter(new jasmine.TrivialReporter());
-				jasmineEnv.addReporter(new jasmine.TeamcityReporter());
 
 				jasmineEnv.execute();
 			});
