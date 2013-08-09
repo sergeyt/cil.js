@@ -390,6 +390,8 @@ var MetaSchema = {
 	},
 };
 
+var EmptyGuid = "0000000000000000";
+
 // spec ref: Partition II, 24.2.1 Metadata root
 
 function MetaReader(reader) {
@@ -513,8 +515,8 @@ function MetaReader(reader) {
 					guids = [];
 					while (h.size > 0) {
 						var guid = guidHeap.readBytes(16);
-						// TODO introduce guid object
-						guids.push(guid);
+						var s = guid.join("");
+						guids.push(s);
 						size -= 16;
 					}
 					break;
