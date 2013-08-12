@@ -53,13 +53,11 @@ function PEImage(reader) {
 		sections: []
 	};
 
-	image.resolveRva = function(rva){
-		for (var i = 0; i < image.sections.length; i++)
-		{
+	image.resolveRva = function(rva) {
+		for (var i = 0; i < image.sections.length; i++) {
 			var section = image.sections[i];
-			if (rva >= section.addr && rva < section.addr + section.size)
-			{
-				return section.offset + rva - section.addr;
+			if (rva >= section.rva && rva < section.rva + section.size) {
+				return section.offset + rva - section.rva;
 			}
 		}
 
@@ -187,7 +185,7 @@ function PEImage(reader) {
 			// CLIHeader			8
 			cliHeader = readDataDirectory();
 
-			if (cli.IsEmpty)
+			if (cliHeader.rva == 0 && cliHeader.size == 0)
 				throw new BadImageFormat();
 
 			// Reserved				8
@@ -223,7 +221,7 @@ function PEImage(reader) {
 		}
 
 		function readCliHeader() {
-			moveToDir(reader, cliHeader);
+			moveToDir(cliHeader);
 
 			// - CLIHeader
 
@@ -234,9 +232,9 @@ function PEImage(reader) {
 
 			var metadata = readDataDirectory();
 
-			image.module.attributes = reader.Read(U32);
+			image.module.attributes = reader.read(U32);
 			// EntryPointToken			4
-			image.module.entryPointToken = reader.Read(U32);
+			image.module.entryPointToken = reader.read(U32);
 			// Resources				8
 			image.module.resources = readDataDirectory();
 			// StrongNameSignature		8
@@ -248,7 +246,7 @@ function PEImage(reader) {
 			// ManagedNativeHeader		8
 
 			// TODO why PEImage should move to metadata section? consider to move this to metadata layer.
-			moveToDir(reader, metadata);
+			moveToDir(metadata);
 		}
 
 		function moveToDir(dir){

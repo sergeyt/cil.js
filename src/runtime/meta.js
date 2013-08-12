@@ -409,24 +409,28 @@ function MetaReader(reader) {
 	};
 
 	function align4() {
-		return reader.seek(((reader.position() + 3) / 4) * 4);
+		var pos = reader.position();
+		var d = pos % 4;
+		if (d == 0) return;
+		return reader.seek(pos + (4 - d));
 	}
 
-	function readAlignedString(maxLength) {
-		var read = 0;
+	function readszAligned(maxLength) {
 		var s = "";
-		while (read < maxLength) {
-			var c = reader.read(U8);
-			if (c == 0) break;
-			read++;
+		while (maxLength-- > 0) {
+			var c = reader.readByte();
+			if (c == 0) {
+				// TODO read all zero bytes
+				align4();
+				break;
+			}
 			s += String.fromCharCode(c);
 		}
-		reader.skip(-1 + ((read + 4) & ~3) - read);
 		return s;
 	}
 
 	function load() {
-		var mdbOffset = reader.Position;
+		var mdbOffset = reader.position();
 
 		// Metadata Header
 		// Signature
@@ -451,7 +455,7 @@ function MetaReader(reader) {
 
 	function loadHeaps(startOffset) {
 		// heap headers
-		var n = reader.read(U6);
+		var n = reader.read(U16);
 		var headers = [];
 
 		var i;
@@ -459,7 +463,10 @@ function MetaReader(reader) {
 			headers[i] = {
 				offset: startOffset + reader.read(U32),
 				size: reader.read(U32),
-				name: readAlignedString(16)
+				// Name of the stream as null-terminated variable length array
+				// of ASCII characters, padded to the next 4-byte boundary
+				// with \0 characters. The name is limited to 32 characters.
+				name: readszAligned(32)
 			};
 		}
 
@@ -470,7 +477,7 @@ function MetaReader(reader) {
 				case "#-":
 				case "#~":
 					reader.seek(h.offset);
-					initTables(h.offset, h.size);
+					initTables();
 					break;
 				case "#Strings":
 					var stringsHeap = reader.slice(h.offset, h.size);
@@ -513,7 +520,8 @@ function MetaReader(reader) {
 				case "#GUID":
 					var guidHeap = reader.slice(h.offset, h.size);
 					guids = [];
-					while (h.size > 0) {
+					var size = h.size;
+					while (size > 0) {
 						var guid = guidHeap.readBytes(16);
 						var s = guid.join("");
 						guids.push(s);
@@ -547,6 +555,8 @@ function MetaReader(reader) {
 		for (var i = 0; i < keys.length; i++) {
 			var key = keys[i];
 			var id = TableId[key];
+			if (id === undefined)
+				continue;
 			result[id] = key;
 		}
 		return result;
@@ -573,8 +583,8 @@ function MetaReader(reader) {
 		var tableNames = getTableNames();
 
 		function isBitSet(u1, u2, bit) {
-			if (bit <= 16) return ((u1 >> bit) & 1) != 0;
-			return ((u2 >> (bit - 16)) & 1) != 0;
+			if (bit <= 31) return ((u1 >> bit) & 1) != 0;
+			return ((u2 >> (bit-32)) & 1) != 0;
 		}
 
 		// read table row nums
@@ -582,13 +592,21 @@ function MetaReader(reader) {
 			// if bit is set table is presented, otherwise it is empty
 			if (isBitSet(header.valid1, header.valid2, i)) {
 				var rowCount = reader.read(I32);
+
 				var table = {
 					id: i,
-					name: tableNames[id],
+					name: tableNames[i],
 					rowCount: rowCount,
 					isSorted: isBitSet(header.sorted1, header.sorted2, i)
 				};
+
+				if (table.name === undefined)
+					throw new Error("No table name!");
+
 				table.schema = MetaSchema[table.name];
+				if (table.schema === undefined)
+					throw new Error("No table schema!");
+
 				table.fetch = fetchRowFn(table);
 				md.tables[i] = table;
 			} else {
@@ -639,23 +657,23 @@ function MetaReader(reader) {
 
 		// setup tables (offset, rowSize, size)
 		var pos = reader.position();
-		for (var i = 0; i < MaxTableCount; i++) {
+		for (var i = 0; i < maxTableCount; i++) {
 			var table = md.tables[i];
-			if (table != null) {
-				table.offset = pos;
-				var rowSize = 0;
-				var columns = [];
-				for (var colkey in Object.keys(table.schema)) {
-					var coldef = table.schema[colkey];
-					var colsize = getColumnSize(coldef);
-					rowSize += colsize;
-					columns.push({ name: colkey, size: colsize, def: coldef });
-				}
-				table.columns = columns;
-				table.rowSize = rowSize;
-				table.size = table.rowCount * rowSize;
-				pos += table.size;
+			if (table == null) continue;
+			table.offset = pos;
+			var rowSize = 0;
+			var columns = [];
+			for (var colkey in Object.keys(table.schema)) {
+				var coldef = table.schema[colkey];
+				if (coldef === undefined) continue;
+				var colsize = getColumnSize(coldef);
+				rowSize += colsize;
+				columns.push({ name: colkey, size: colsize, def: coldef });
 			}
+			table.columns = columns;
+			table.rowSize = rowSize;
+			table.size = table.rowCount * rowSize;
+			pos += table.size;
 		}
 	}
 
@@ -669,13 +687,9 @@ function MetaReader(reader) {
 				var col = table.columns[i];
 				var rv = col.size == 2 ? rowReader.read(U16) : rowReader(U32); // raw value
 				var value = decodeColumnValue(col, rv);
-				cells[i] = {
-					column: col,
-					value: value
-				};
+				cells[i] = value;
 			}
 			return {
-				table: table,
 				index: rowIndex,
 				cells: cells
 			};

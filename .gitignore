@@ -1,3 +1,7 @@
+# folders
 bin
 obj
 lib
+
+# files
+test/*.dll
