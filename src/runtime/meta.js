@@ -150,10 +150,10 @@ var CodedIndex = {
 
 function decodeCodedIndex(desc, value) {
 	var mask = 0xFF >> (8 - desc.bits);
-	var tag = (int)(value & mask);
+	var tag = value & mask;
 	if (tag < 0 || tag >= desc.tables.length)
 		throw new RangeError("Invalid coded index " + value);
-	var index = codedIndex >> Bits;
+	var index = value >> desc.bits;
 	return { tableId: tag, index: index };
 }
 
@@ -302,6 +302,7 @@ var MetaSchema = {
 		rva: I32,
 		implFlags: I16, // TODO MethodImplAttributes enum
 		flags: I16, // TODO MethodAttributes enum
+		name: STR,
 		signature: BLOB,
 		params: TableIndex(TableId.Param)
 	},
@@ -387,10 +388,28 @@ var MetaSchema = {
 	},
 	EncodingMap: {
 		token: I32
-	},
+	}
 };
 
 var EmptyGuid = "0000000000000000";
+
+function readPackedInt(reader) {
+	var b0 = reader.readByte();
+	//1 byte
+	if ((b0 & 0x80) == 0)
+		return b0;
+
+	var b1 = reader.readByte();
+
+	//2 bytes
+	if ((b0 & 0xC0) == 0x80)
+		return (((b0 & 0x3F) << 8) | b1);
+
+	//4 bytes
+	var b2 = reader.readByte();
+	var b3 = reader.readByte();
+	return ((b0 & 0x3F) << 24) | (b1 << 16) | (b2 << 8) | b3;
+}
 
 // spec ref: Partition II, 24.2.1 Metadata root
 
@@ -483,7 +502,7 @@ function MetaReader(reader) {
 					var stringsHeap = reader.slice(h.offset, h.size);
 					strings = {
 						fetch: function(offset) {
-							if (offset >= stringsHeap.length())
+							if (offset >= stringsHeap.length)
 								throw new RangeError("Invalid #Strings heap index.");
 							// TODO cache strings
 							stringsHeap.seek(offset);
@@ -533,15 +552,14 @@ function MetaReader(reader) {
 					blobs = {
 						fetch: function(offset) {
 							if (offset >= blobHeap.length)
-								throw new BadMetadataException("Invalid #Blob heap offset.");
+								throw new RangeError("Invalid #Blob heap offset.");
 
 							blobHeap.seek(offset);
 
-							var length = readPackedInt(blobHeap);
-							if (length <= 0) return EmptyBlob;
+							var blobLength = readPackedInt(blobHeap);
+							if (blobLength <= 0) return EmptyBlob;
 
-							//TODO: implement slice without need to know that _heap is another slice
-							return blobHeap.slice(0, length);
+							return blobHeap.slice(blobHeap.position(), blobLength);
 						}
 					};
 					break;
@@ -561,6 +579,10 @@ function MetaReader(reader) {
 		}
 		return result;
 	}
+
+	function isObject(v) { return !!(v && (typeof v == 'object')); }
+	function isTableIndex(v) { return v.hasOwnProperty("tableId"); }
+	function isCodedIndex(v) { return v.hasOwnProperty("bits") && v.hasOwnProperty("tables"); }
 
 	function initTables() {
 		reader.skip(4); //reserved: 4, always 0
@@ -620,17 +642,23 @@ function MetaReader(reader) {
 			return n >= 0x10000 ? 4 : 2;
 		}
 
-		function isObject(v) { return !!(v && (typeof v == 'object')); }
-		function isTableIndex(col) { return col.tableId !== undefined; }
-
 		function getColumnSize(col) {
 			if (isObject(col)) {
-				if (isTableIndex(col.tableId)) {
+				if (isTableIndex(col)) {
 					return tableIndexSize(col.tableId);
-				} else { // coded index
+				} else if (isCodedIndex(col)) {
 					var tables = col.tables.map(tableIndexSize);
 					// TODO cache size of coded index
-					return Math.max.apply(tables);
+					return Math.max.apply(null, tables);
+				} else { // struct
+					var keys = Object.keys(col);
+					var size = 0;
+					for (var i = 0; i < keys.length; i++) {
+						var key = keys[i];
+						var type = col[key];
+						size += getColumnSize(type);
+					}
+					return size;
 				}
 			}
 
@@ -663,9 +691,10 @@ function MetaReader(reader) {
 			table.offset = pos;
 			var rowSize = 0;
 			var columns = [];
-			for (var colkey in Object.keys(table.schema)) {
+			var colkeys = Object.keys(table.schema);
+			for (var j = 0; j < colkeys.length; j++) {
+				var colkey = colkeys[j];
 				var coldef = table.schema[colkey];
-				if (coldef === undefined) continue;
 				var colsize = getColumnSize(coldef);
 				rowSize += colsize;
 				columns.push({ name: colkey, size: colsize, def: coldef });
@@ -682,39 +711,51 @@ function MetaReader(reader) {
 			var offset = table.offset + rowIndex * table.rowSize;
 			var rowReader = reader.slice(offset, table.rowSize);
 			var colcount = table.columns.length;
-			var cells = new Array(colcount);
+			var row = {};
 			for (var i = 0; i < colcount; i++) {
 				var col = table.columns[i];
-				var rv = col.size == 2 ? rowReader.read(U16) : rowReader(U32); // raw value
-				var value = decodeColumnValue(col, rv);
-				cells[i] = value;
+				var value = readColumnValue(rowReader, col);
+				row[col.name] = value;
 			}
-			return {
-				index: rowIndex,
-				cells: cells
-			};
+			return row;
 		};
 	}
 
-	function decodeColumnValue(col, value) {
-		if (isObject(col)) {
-			if (isTableIndex(col.tableId)) {
-				return { tableId: col.tableId, index: value };
-			} else { // coded index
-				return decodeCodedIndex(col, value);
+	function readColumnValue(rowReader, col) {
+		var value;
+		var def = col.def;
+		if (isObject(def)) {
+			if (isTableIndex(def)) {
+				value = col.size == 2 ? rowReader.read(U16) : rowReader.read(U32);
+				return { tableId: def.tableId, index: value };
+			} else if (isCodedIndex(def)) {
+				value = col.size == 2 ? rowReader.read(U16) : rowReader.read(U32);
+				return decodeCodedIndex(def, value);
+			} else { // struct
+				var keys = Object.keys(def);
+				value = {};
+				for (var i = 0; i < keys.length; i++) {
+					var key = keys[i];
+					var type = def[key];
+					value[key] = readColumnValue(rowReader, { def: type, size: 0 });
+				}
+				return value;
 			}
 		}
 
-		switch (col) {
+		switch (def) {
 			case STR:
+				value = col.size == 2 ? rowReader.read(U16) : rowReader.read(U32);
 				return strings.fetch(value);
 			case GUID:
+				value = col.size == 2 ? rowReader.read(U16) : rowReader.read(U32);
 				// guid index is 1 based
-				return value == 0 ? EmptyGuid : guids(value - 1);
+				return value == 0 ? EmptyGuid : guids[value - 1];
 			case BLOB:
+				value = col.size == 2 ? rowReader.read(U16) : rowReader.read(U32);
 				return blobs.fetch(value);
 			default:
-				return value;
+				return rowReader.read(def);
 		}
 	}
 
