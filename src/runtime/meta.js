@@ -636,9 +636,13 @@ function MetaReader(reader) {
 			}
 		}
 
-		function tableIndexSize(tableId) {
+		function getRowCount(tableId) {
 			var t = md.tables[tableId];
-			var n = t != null ? t.rowCount : 0;
+			return t != null ? t.rowCount : 0;
+		}
+
+		function tableIndexSize(tableId) {
+			var n = getRowCount(tableId);
 			return n >= 0x10000 ? 4 : 2;
 		}
 
@@ -647,9 +651,11 @@ function MetaReader(reader) {
 				if (isTableIndex(col)) {
 					return tableIndexSize(col.tableId);
 				} else if (isCodedIndex(col)) {
-					var tables = col.tables.map(tableIndexSize);
+					var tables = col.tables.map(getRowCount);
 					// TODO cache size of coded index
-					return Math.max.apply(null, tables);
+					var maxRowCount = Math.max.apply(null, tables);
+					var n = maxRowCount << col.bits;
+					return n >= 0x10000 ? 4 : 2;
 				} else { // struct
 					var keys = Object.keys(col);
 					var size = 0;
