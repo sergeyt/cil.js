@@ -411,6 +411,16 @@ function readPackedInt(reader) {
 	return ((b0 & 0x3F) << 24) | (b1 << 16) | (b2 << 8) | b3;
 }
 
+function getTableNameById(id) {
+	var keys = Object.keys(TableId);
+	for (var i = 0; i < keys.length; i++) {
+		var key = keys[i];
+		if (TableId[key] == id)
+			return key;
+	}
+	return null;
+}
+
 // spec ref: Partition II, 24.2.1 Metadata root
 
 function MetaReader(reader) {
