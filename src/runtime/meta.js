@@ -148,13 +148,19 @@ var CodedIndex = {
 	},
 };
 
+function decodeTableIndex(token) {
+	var id = (token >> 24) & 0xff;
+	var index = token & 0xffffff;
+	return { tableId: id, index: index };
+}
+
 function decodeCodedIndex(desc, value) {
 	var mask = 0xFF >> (8 - desc.bits);
-	var tag = value & mask;
-	if (tag < 0 || tag >= desc.tables.length)
+	var id = value & mask;
+	if (id < 0 || id >= desc.tables.length)
 		throw new RangeError("Invalid coded index " + value);
 	var index = value >> desc.bits;
-	return { tableId: tag, index: index };
+	return { tableId: id, index: index };
 }
 
 // metadata row structures
@@ -434,6 +440,7 @@ function MetaReader(reader) {
 	var blobs = null;
 
 	var md = {
+		entryPointToken: pe.module.entryPointToken,
 		tables: []
 	};
 

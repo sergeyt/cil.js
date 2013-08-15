@@ -3,7 +3,10 @@ function VM(appUrl, args) {
 	loadApp(appUrl, start);
 
 	function start(app) {
-
+		var entryPointIndex = decodeTableIndex(app.meta.entryPointToken);
+		var methodDef = app.meta.tables[TableId.MethodDef];
+		var entryMethod = methodDef.fetch(entryPointIndex - 1);
+		// TODO resolve rva and compile method body
 	}
 
 	// TODO steps:
@@ -43,21 +46,6 @@ function loadApp(appUrl, appLoaded) {
 		});
 	});
 
-	function loadRef(url, complete) {
-		load(url, function(buf) {
-			var meta = MetaReader(Stream(buf));
-			app.refs[meta.assembly.name] = meta;
-			loadRefs(meta, complete);
-		});
-	}
-
-	function wrap(f) {
-		var args = arguments.slice(1);
-		return function() {
-			f.apply(null, args);
-		};
-	}
-
 	function loadRefs(meta, complete) {
 		var assemblyRefs = app.meta.tables[TableId.AssemblyRef];
 
@@ -81,5 +69,20 @@ function loadApp(appUrl, appLoaded) {
 				}, name));
 			}
 		}
+	}
+
+	function loadRef(url, complete) {
+		load(url, function(buf) {
+			var meta = MetaReader(Stream(buf));
+			app.refs[meta.assembly.name] = meta;
+			loadRefs(meta, complete);
+		});
+	}
+
+	function wrap(f) {
+		var args = arguments.slice(1);
+		return function() {
+			f.apply(null, args);
+		};
 	}
 }
