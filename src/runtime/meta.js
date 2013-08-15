@@ -776,6 +776,16 @@ function MetaReader(reader) {
 	}
 
 	load();
-	
+
+	// high level API
+
+	var asmTable = md.tables[TableId.Assembly];
+	if (asmTable == null)
+		throw new Error("No assembly table.");
+	if (asmTable.rowCount != 1)
+		throw new Error("Expected one row in assembly table, but was " + asmTable.rowCount + ".");
+
+	md.assembly = asmTable.fetch(0);
+
 	return md;
 }
