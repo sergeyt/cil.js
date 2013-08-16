@@ -2,7 +2,11 @@
 bin
 obj
 lib
+tools/codegen/.nuget
+tools/codegen/packages
 
 # files
+*.user
+*.suo
 test/*.dll
 test/*.exe
