@@ -2,6 +2,7 @@
 bin
 obj
 lib
+node_modules
 tools/codegen/.nuget
 tools/codegen/packages
 
