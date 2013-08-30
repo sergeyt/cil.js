@@ -1,0 +1,18 @@
+{
+  "author": "Sergey Todyshev",
+  "name": "vmjs",
+  "version": "0.0.1",
+  "homepage": "https://github.com/sergeyt/vmjs",
+  "bugs": "https://github.com/sergeyt/vmjs/issues",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:sergeyt/vmjs.git"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "karma": "~0.10"
+  },
+  "scripts": {
+    "test": "./node_modules/.bin/karma start --single-run"
+  }
+}
